@@ -130,29 +130,31 @@ export default function PerformanceCardInline() {
             </Badge>
           )}
         </div>
-        <div className="flex items-center gap-2">
-          <div className="flex items-center gap-1">
-            {isProfit ? (
-              <TrendingUp className="h-3.5 w-3.5 text-green-600" />
-            ) : (
-              <TrendingDown className="h-3.5 w-3.5 text-red-600" />
-            )}
-            <span className={`text-lg font-semibold ${
-              isProfit ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'
-            }`}>
-              {formatCurrency(totalPnL)}
-            </span>
+        <div className="flex items-center md:flex-row flex-col gap-2">
+          <div className='flex items-center gap-2'>
+            <div className="flex items-center gap-1">
+              {isProfit ? (
+                <TrendingUp className="h-3.5 w-3.5 text-green-600" />
+              ) : (
+                <TrendingDown className="h-3.5 w-3.5 text-red-600" />
+              )}
+              <span className={`text-lg font-semibold ${
+                isProfit ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'
+              }`}>
+                {formatCurrency(totalPnL)}
+              </span>
+            </div>
+            <Badge
+              variant={isProfit ? "outline" : "destructive"}
+              className={`h-4 text-[10px] px-1 ${
+                isProfit
+                  ? 'border-green-600 text-green-600 dark:border-green-400 dark:text-green-400'
+                  : ''
+              }`}
+            >
+              {formatPercentage(returnPercent)}
+            </Badge>
           </div>
-          <Badge
-            variant={isProfit ? "outline" : "destructive"}
-            className={`h-4 text-[10px] px-1 ${
-              isProfit
-                ? 'border-green-600 text-green-600 dark:border-green-400 dark:text-green-400'
-                : ''
-            }`}
-          >
-            {formatPercentage(returnPercent)}
-          </Badge>
           <div className="flex gap-2 text-[10px] text-muted-foreground">
             <span>Real: {formatCurrency(totalRealizedPnL)}</span>
             <span>Fees: {formatCurrency(Math.abs(totalFees))}</span>

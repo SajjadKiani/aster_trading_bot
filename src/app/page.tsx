@@ -225,7 +225,7 @@ export default function DashboardPage() {
         {/* Main Content */}
         <div className="flex-1 p-6 space-y-6 overflow-y-auto">
           {/* Account Summary - Minimal Design */}
-          <div className="flex flex-wrap items-center gap-3">
+          <div className="flex flex-wrap items-center justify-between gap-3">
             {/* Total Balance */}
             <div className="flex items-center gap-2">
               <Wallet className="h-4 w-4 text-muted-foreground" />
@@ -250,7 +250,7 @@ export default function DashboardPage() {
               </div>
             </div>
 
-            <div className="w-px h-8 bg-border" />
+            <div className="w-px h-8 bg-border hidden md:block" />
 
             {/* Available Balance */}
             <div className="flex items-center gap-2">
@@ -265,7 +265,7 @@ export default function DashboardPage() {
               </div>
             </div>
 
-            <div className="w-px h-8 bg-border" />
+            <div className="w-px h-8 bg-border hidden md:block" />
 
             {/* Position Value */}
             <div className="flex items-center gap-2">
@@ -280,7 +280,7 @@ export default function DashboardPage() {
               </div>
             </div>
 
-            <div className="w-px h-8 bg-border" />
+            <div className="w-px h-8 bg-border hidden md:block" />
 
             {/* Unrealized PnL */}
             <div className="flex items-center gap-2">
@@ -318,12 +318,12 @@ export default function DashboardPage() {
               </div>
             </div>
 
-            <div className="w-px h-8 bg-border" />
+            <div className="w-px h-8 bg-border hidden md:block" />
 
             {/* Session Performance - Inline */}
             <PerformanceCardInline />
 
-            <div className="w-px h-8 bg-border" />
+            <div className="w-px h-8 bg-border hidden md:block" />
 
             {/* Active Trading Symbols */}
             <div className="flex items-center gap-2">

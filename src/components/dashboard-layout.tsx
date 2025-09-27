@@ -53,7 +53,7 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
           <div className="flex items-center gap-1 text-xs text-yellow-600 dark:text-yellow-400">
             <span>⚠️</span>
             <span className="font-medium">OPEN BETA</span>
-            <span className="text-muted-foreground">- Only use what you can afford to lose</span>
+            <span className="text-muted-foreground md:block hidden">- Only use what you can afford to lose</span>
           </div>
 
           <div className="flex flex-1 items-center justify-end">

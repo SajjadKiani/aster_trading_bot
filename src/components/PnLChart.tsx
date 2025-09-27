@@ -359,7 +359,7 @@ export default function PnLChart() {
     return (
       <Card>
         <CardHeader className="pb-2">
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between flex-wrap">
             <button
               onClick={() => setIsCollapsed(!isCollapsed)}
               className="flex items-center gap-2 hover:opacity-80 transition-opacity"

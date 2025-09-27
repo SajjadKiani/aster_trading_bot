@@ -374,14 +374,14 @@ export default function RecentOrdersTable({ maxRows = 50 }: RecentOrdersTablePro
   return (
     <Card>
       <CardHeader>
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between flex-wrap gap-1">
           <CardTitle className="flex items-center gap-2">
             Recent Orders
             <Badge variant="outline" className="ml-2">
               {orders.length} orders
             </Badge>
           </CardTitle>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             {/* Status Filter */}
             <Select value={statusFilter} onValueChange={setStatusFilter}>
               <SelectTrigger className="w-[140px]">
@@ -424,7 +424,7 @@ export default function RecentOrdersTable({ maxRows = 50 }: RecentOrdersTablePro
         </div>
 
         {/* Statistics Bar */}
-        <div className="flex items-center gap-4 mt-4 text-sm">
+        <div className="flex flex-wrap items-center gap-4 mt-4 text-sm">
           <div className="flex items-center gap-2">
             <span className="text-muted-foreground">Win Rate:</span>
             <span className="font-medium">

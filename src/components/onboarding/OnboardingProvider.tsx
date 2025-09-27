@@ -83,7 +83,7 @@ export function OnboardingProvider({ children }: { children: ReactNode }) {
       const response = await fetch('/api/config');
       if (response.ok) {
         const config = await response.json();
-        const hasApiKeys = config?.api?.apiKey && config?.api?.secretKey;
+        const hasApiKeys = (config?.api?.apiKey && config?.api?.secretKey) || config?.global?.paperMode;
         return hasApiKeys;
       }
     } catch (error) {

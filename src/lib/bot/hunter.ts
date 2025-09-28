@@ -19,6 +19,7 @@ import {
   PricePrecisionError,
   QuantityPrecisionError
 } from '../errors/TradingErrors';
+import { errorLogger } from '../services/errorLogger';
 
 export class Hunter extends EventEmitter {
   private ws: WebSocket | null = null;
@@ -115,6 +116,17 @@ export class Hunter extends EventEmitter {
       console.log('Hunter: Symbol precision manager initialized');
     } catch (error) {
       console.error('Hunter: Failed to initialize symbol precision manager:', error);
+      // Broadcast error to UI
+      if (this.statusBroadcaster) {
+        this.statusBroadcaster.broadcastConfigError(
+          'Symbol Precision Error',
+          'Failed to initialize symbol precision manager. Using default precision values.',
+          {
+            component: 'Hunter',
+            rawError: error,
+          }
+        );
+      }
       // Continue anyway, will use default precision values
     }
 
@@ -148,11 +160,49 @@ export class Hunter extends EventEmitter {
         this.handleLiquidationEvent(event);
       } catch (error) {
         console.error('Hunter: WS message parse error:', error);
+        // Log to error database
+        errorLogger.logError(error instanceof Error ? error : new Error(String(error)), {
+          type: 'websocket',
+          severity: 'low',
+          context: {
+            component: 'Hunter',
+            userAction: 'Processing WebSocket message',
+            metadata: { rawMessage: data.toString() }
+          }
+        });
+        // Broadcast error to UI
+        if (this.statusBroadcaster) {
+          this.statusBroadcaster.broadcastWebSocketError(
+            'Message Parse Error',
+            'Failed to parse liquidation stream message',
+            {
+              component: 'Hunter',
+              rawError: error,
+            }
+          );
+        }
       }
     });
 
     this.ws.on('error', (error) => {
       console.error('Hunter WS error:', error);
+      // Log to error database
+      errorLogger.logWebSocketError(
+        'wss://fstream.asterdex.com/ws/!forceOrder@arr',
+        error instanceof Error ? error : new Error(String(error)),
+        1
+      );
+      // Broadcast error to UI
+      if (this.statusBroadcaster) {
+        this.statusBroadcaster.broadcastWebSocketError(
+          'Hunter WebSocket Error',
+          'Connection error with liquidation stream. Reconnecting in 5 seconds...',
+          {
+            component: 'Hunter',
+            rawError: error,
+          }
+        );
+      }
       // Reconnect after delay
       setTimeout(() => this.connectWebSocket(), 5000);
     });
@@ -160,6 +210,16 @@ export class Hunter extends EventEmitter {
     this.ws.on('close', () => {
       console.log('Hunter WS closed');
       if (this.isRunning) {
+        // Broadcast reconnection attempt to UI
+        if (this.statusBroadcaster) {
+          this.statusBroadcaster.broadcastWebSocketError(
+            'Hunter WebSocket Closed',
+            'Liquidation stream disconnected. Reconnecting in 5 seconds...',
+            {
+              component: 'Hunter',
+            }
+          );
+        }
         setTimeout(() => this.connectWebSocket(), 5000);
       }
     });
@@ -195,6 +255,18 @@ export class Hunter extends EventEmitter {
     // Store liquidation in database (non-blocking)
     liquidationStorage.saveLiquidation(liquidation, volumeUSDT).catch(error => {
       console.error('Hunter: Failed to store liquidation:', error);
+      // Log to error database
+      errorLogger.logError(error instanceof Error ? error : new Error(String(error)), {
+        type: 'general',
+        severity: 'low',
+        context: {
+          component: 'Hunter',
+          symbol: liquidation.symbol,
+          userAction: 'Storing liquidation event',
+          metadata: { volumeUSDT }
+        }
+      });
+      // Non-critical error, don't broadcast to UI to avoid spam
     });
 
     // Check direction-specific volume thresholds
@@ -478,17 +550,13 @@ export class Hunter extends EventEmitter {
 
       const calculatedQuantity = notionalUSDT / currentPrice;
 
-      // Format quantity according to symbol's step size
-      quantity = symbolPrecision.hasSymbol(symbol)
-        ? symbolPrecision.formatQuantity(symbol, calculatedQuantity)
-        : parseFloat(calculatedQuantity.toFixed(symbolInfo.quantityPrecision || 8));
+      // Always format quantity and price using symbolPrecision (which now has defaults)
+      quantity = symbolPrecision.formatQuantity(symbol, calculatedQuantity);
 
       // Validate order parameters
       if (orderType === 'LIMIT') {
-        // Format price according to symbol's tick size before validation
-        orderPrice = symbolPrecision.hasSymbol(symbol)
-          ? symbolPrecision.formatPrice(symbol, orderPrice)
-          : orderPrice;
+        // Always format price using symbolPrecision (which now has defaults)
+        orderPrice = symbolPrecision.formatPrice(symbol, orderPrice);
 
         const validation = await validateOrderParams(symbol, side, orderPrice, quantity);
         if (!validation.valid) {
@@ -496,9 +564,9 @@ export class Hunter extends EventEmitter {
           return;
         }
 
-        // Use adjusted values if provided
-        if (validation.adjustedPrice) orderPrice = validation.adjustedPrice;
-        if (validation.adjustedQuantity) quantity = validation.adjustedQuantity;
+        // Use adjusted values if provided (these are already properly formatted)
+        if (validation.adjustedPrice !== undefined) orderPrice = validation.adjustedPrice;
+        if (validation.adjustedQuantity !== undefined) quantity = validation.adjustedQuantity;
       }
 
       // Set leverage if needed
@@ -562,8 +630,26 @@ export class Hunter extends EventEmitter {
         leverage: symbolConfig.leverage
       });
 
+      // Log to error database
+      await errorLogger.logTradingError(
+        `placeTrade-${side}`,
+        symbol,
+        tradingError,
+        {
+          side,
+          quantity,
+          price: currentPrice,
+          leverage: symbolConfig.leverage,
+          tradeSizeUSDT,
+          notionalUSDT,
+          errorCode: tradingError.code,
+          errorType: tradingError.constructor.name
+        }
+      );
+
       // Special handling for specific error types
       if (tradingError instanceof NotionalError) {
+        const errorMsg = `Required: ${tradingError.requiredNotional} USDT, Actual: ${tradingError.actualNotional.toFixed(2)} USDT`;
         console.error(`Hunter: NOTIONAL ERROR for ${symbol}:`);
         console.error(`  Required: ${tradingError.requiredNotional} USDT`);
         console.error(`  Actual: ${tradingError.actualNotional.toFixed(2)} USDT`);
@@ -572,26 +658,111 @@ export class Hunter extends EventEmitter {
         console.error(`  Leverage: ${tradingError.leverage}x`);
         console.error(`  Margin used: ${tradeSizeUSDT} USDT (${side === 'BUY' ? 'long' : 'short'})`);
         console.error(`  This indicates the symbol may have special requirements or price has moved significantly.`);
+
+        if (this.statusBroadcaster) {
+          this.statusBroadcaster.broadcastTradingError(
+            `Notional Error - ${symbol}`,
+            errorMsg,
+            {
+              component: 'Hunter',
+              symbol,
+              errorCode: tradingError.code,
+              details: tradingError.details,
+            }
+          );
+        }
       } else if (tradingError instanceof RateLimitError) {
         console.error(`Hunter: RATE LIMIT ERROR - Too many requests, please slow down`);
         console.error(`  Consider reducing order frequency or implementing request throttling`);
+
+        if (this.statusBroadcaster) {
+          this.statusBroadcaster.broadcastApiError(
+            'Rate Limit Exceeded',
+            'Too many requests. Please reduce order frequency.',
+            {
+              component: 'Hunter',
+              errorCode: tradingError.code,
+            }
+          );
+        }
       } else if (tradingError instanceof InsufficientBalanceError) {
         console.error(`Hunter: INSUFFICIENT BALANCE ERROR for ${symbol}`);
         console.error(`  Check account balance and margin requirements`);
+
+        if (this.statusBroadcaster) {
+          this.statusBroadcaster.broadcastTradingError(
+            `Insufficient Balance - ${symbol}`,
+            'Check account balance and margin requirements',
+            {
+              component: 'Hunter',
+              symbol,
+              errorCode: tradingError.code,
+            }
+          );
+        }
       } else if (tradingError instanceof ReduceOnlyError) {
         console.error(`Hunter: REDUCE ONLY ERROR for ${symbol}`);
         console.error(`  Cannot place reduce-only order when no position exists`);
+
+        if (this.statusBroadcaster) {
+          this.statusBroadcaster.broadcastTradingError(
+            `Reduce Only Error - ${symbol}`,
+            'Cannot place reduce-only order without an open position',
+            {
+              component: 'Hunter',
+              symbol,
+              errorCode: tradingError.code,
+            }
+          );
+        }
       } else if (tradingError instanceof PricePrecisionError) {
         console.error(`Hunter: PRICE PRECISION ERROR for ${symbol}`);
         console.error(`  Price ${tradingError.price} doesn't meet tick size requirements`);
+
+        if (this.statusBroadcaster) {
+          this.statusBroadcaster.broadcastTradingError(
+            `Price Precision Error - ${symbol}`,
+            `Price ${tradingError.price} doesn't meet tick size requirements`,
+            {
+              component: 'Hunter',
+              symbol,
+              errorCode: tradingError.code,
+            }
+          );
+        }
       } else if (tradingError instanceof QuantityPrecisionError) {
         console.error(`Hunter: QUANTITY PRECISION ERROR for ${symbol}`);
         console.error(`  Quantity ${tradingError.quantity} doesn't meet step size requirements`);
+
+        if (this.statusBroadcaster) {
+          this.statusBroadcaster.broadcastTradingError(
+            `Quantity Precision Error - ${symbol}`,
+            `Quantity ${tradingError.quantity} doesn't meet step size requirements`,
+            {
+              component: 'Hunter',
+              symbol,
+              errorCode: tradingError.code,
+            }
+          );
+        }
       } else {
         console.error(`Hunter: Place trade error for ${symbol} (${tradingError.code}):`, tradingError.message);
+
+        if (this.statusBroadcaster) {
+          this.statusBroadcaster.broadcastTradingError(
+            `Trading Error - ${symbol}`,
+            tradingError.message,
+            {
+              component: 'Hunter',
+              symbol,
+              errorCode: tradingError.code,
+              details: tradingError.details,
+            }
+          );
+        }
       }
 
-      // Broadcast the error
+      // Broadcast the order failed event (keep for backward compatibility)
       if (this.statusBroadcaster) {
         this.statusBroadcaster.broadcastOrderFailed({
           symbol,
@@ -627,10 +798,8 @@ export class Hunter extends EventEmitter {
           const markPriceData = await getMarkPrice(symbol);
           const rawFallbackPrice = parseFloat(Array.isArray(markPriceData) ? markPriceData[0].markPrice : markPriceData.markPrice);
 
-          // Format price according to symbol's tick size
-          fallbackPrice = symbolPrecision.hasSymbol(symbol)
-            ? symbolPrecision.formatPrice(symbol, rawFallbackPrice)
-            : rawFallbackPrice;
+          // Always use symbolPrecision formatting (which now has defaults)
+          fallbackPrice = symbolPrecision.formatPrice(symbol, rawFallbackPrice);
 
           // Calculate quantity for fallback order
           let fallbackNotionalUSDT = symbolConfig.tradeSize * symbolConfig.leverage;
@@ -644,10 +813,8 @@ export class Hunter extends EventEmitter {
           // Calculate raw quantity
           const rawFallbackQuantity = fallbackNotionalUSDT / fallbackPrice;
 
-          // Format quantity according to symbol's step size
-          fallbackQuantity = symbolPrecision.hasSymbol(symbol)
-            ? symbolPrecision.formatQuantity(symbol, rawFallbackQuantity)
-            : parseFloat(rawFallbackQuantity.toFixed(fallbackSymbolInfo.quantityPrecision || 8));
+          // Always use symbolPrecision formatting (which now has defaults)
+          fallbackQuantity = symbolPrecision.formatQuantity(symbol, rawFallbackQuantity);
 
           console.log(`Hunter: Fallback calculation for ${symbol}: margin=${symbolConfig.tradeSize} USDT, leverage=${symbolConfig.leverage}x, price=${fallbackPrice}, notional=${fallbackNotionalUSDT} USDT, quantity=${fallbackQuantity}`);
 
@@ -695,7 +862,25 @@ export class Hunter extends EventEmitter {
             leverage: symbolConfig.leverage
           });
 
+          // Log fallback error to database
+          await errorLogger.logTradingError(
+            `placeTrade-fallback-${side}`,
+            symbol,
+            fallbackTradingError,
+            {
+              side,
+              quantity: fallbackQuantity,
+              price: fallbackPrice,
+              leverage: symbolConfig.leverage,
+              tradeSizeUSDT,
+              errorCode: fallbackTradingError.code,
+              errorType: fallbackTradingError.constructor.name,
+              isFallbackAttempt: true
+            }
+          );
+
           if (fallbackTradingError instanceof NotionalError) {
+            const errorMsg = `Required: ${fallbackTradingError.requiredNotional} USDT, Actual: ${fallbackTradingError.actualNotional.toFixed(2)} USDT (fallback attempt)`;
             console.error(`Hunter: CRITICAL NOTIONAL ERROR in fallback for ${symbol}:`);
             console.error(`  Required: ${fallbackTradingError.requiredNotional} USDT`);
             console.error(`  Actual: ${fallbackTradingError.actualNotional.toFixed(2)} USDT`);
@@ -703,12 +888,62 @@ export class Hunter extends EventEmitter {
             console.error(`  Quantity: ${fallbackTradingError.quantity}`);
             console.error(`  Even with adjustments, notional requirement not met!`);
             console.error(`  Check if symbol has special requirements or if price data is stale.`);
+
+            if (this.statusBroadcaster) {
+              this.statusBroadcaster.broadcastTradingError(
+                `Critical Notional Error - ${symbol}`,
+                errorMsg,
+                {
+                  component: 'Hunter',
+                  symbol,
+                  errorCode: fallbackTradingError.code,
+                  details: { ...fallbackTradingError.details, isFallback: true },
+                }
+              );
+            }
           } else if (fallbackTradingError instanceof RateLimitError) {
             console.error(`Hunter: RATE LIMIT in fallback - backing off`);
+
+            if (this.statusBroadcaster) {
+              this.statusBroadcaster.broadcastApiError(
+                'Rate Limit (Fallback)',
+                'Rate limit hit during fallback order attempt',
+                {
+                  component: 'Hunter',
+                  symbol,
+                  errorCode: fallbackTradingError.code,
+                }
+              );
+            }
           } else if (fallbackTradingError instanceof InsufficientBalanceError) {
             console.error(`Hunter: INSUFFICIENT BALANCE in fallback for ${symbol}`);
+
+            if (this.statusBroadcaster) {
+              this.statusBroadcaster.broadcastTradingError(
+                `Insufficient Balance (Fallback) - ${symbol}`,
+                'Insufficient balance for fallback market order',
+                {
+                  component: 'Hunter',
+                  symbol,
+                  errorCode: fallbackTradingError.code,
+                }
+              );
+            }
           } else {
             console.error(`Hunter: Fallback order failed for ${symbol} (${fallbackTradingError.code}):`, fallbackTradingError.message);
+
+            if (this.statusBroadcaster) {
+              this.statusBroadcaster.broadcastTradingError(
+                `Fallback Order Failed - ${symbol}`,
+                fallbackTradingError.message,
+                {
+                  component: 'Hunter',
+                  symbol,
+                  errorCode: fallbackTradingError.code,
+                  details: fallbackTradingError.details,
+                }
+              );
+            }
           }
 
           // Broadcast fallback order failed event

@@ -31,8 +31,23 @@ A smart trading bot that monitors and trades liquidation events on Aster DEX. Fe
 **[🎥 Watch Complete Setup Tutorial](https://www.youtube.com/watch?v=Np9LZpWUhXY)** - Follow along with this step-by-step video guide!
 
 ### Prerequisites
-- [Node.js 20+](https://nodejs.org/)
-- [Aster DEX Account](https://www.asterdex.com/en/referral/3TixB2)
+
+Before installing the bot, make sure you have the following installed on your system:
+
+1. **Node.js v20.0.0 or higher** (Required)
+   - Download from: https://nodejs.org/
+   - Verify installation: `node --version` (should show v20.x.x or higher)
+   - Includes npm (Node Package Manager) which is required for installation
+
+2. **Git** (Required for cloning the repository)
+   - Windows: Download from https://git-scm.com/download/win
+   - macOS: Install via Homebrew `brew install git` or from https://git-scm.com/download/mac
+   - Linux: `sudo apt-get install git` (Ubuntu/Debian) or `sudo yum install git` (RHEL/CentOS)
+   - Verify installation: `git --version`
+
+3. **Aster DEX Account** (Required for live trading)
+   - Create account at: https://www.asterdex.com/en/referral/3TixB2
+   - Generate API keys for bot access (see Configuration section)
 
 ### Installation
 
@@ -72,12 +87,60 @@ npm run bot        # Run bot only
 npm test           # Run tests
 ```
 
+## 🔄 Updating the Bot
+
+When pulling updates from the repository:
+
+```bash
+# 1. Pull latest changes
+git pull
+
+# 2. Install any new dependencies
+npm install
+
+# 3. Build the project
+npm run build
+
+# 4. Run the bot
+npm run dev
+```
+
+**Note**: The `npm install` step is crucial as dependencies may have changed between versions.
+
 ## 🛡️ Safety Features
 
 - Paper mode for testing
 - Automatic stop-loss/take-profit
 - Position size limits
 - WebSocket auto-reconnection
+
+## 🌐 Remote Access Configuration
+
+The bot supports remote access, allowing you to monitor and control it from any device on your network.
+
+### Enable Remote WebSocket Access
+
+1. **Via Web UI** (Recommended):
+   - Navigate to http://localhost:3000/config
+   - Go to "Server Settings" section
+   - Toggle "Enable Remote WebSocket Access"
+   - Save configuration
+   - Access from remote device: `http://your_server_ip:3000`
+
+2. **Via Environment Variable** (Advanced):
+   - Copy `.env.example` to `.env.local`
+   - Set `NEXT_PUBLIC_WS_HOST=your_server_ip`
+   - Restart the application
+
+### Remote Access Options
+
+| Method | Description | Use Case |
+|--------|-------------|----------|
+| Auto-detect | Automatically uses browser's hostname | Default - works for most setups |
+| Config Host | Set specific host in config UI | When using specific hostname/domain |
+| Environment Variable | Override via `NEXT_PUBLIC_WS_HOST` | Docker/cloud deployments |
+
+**Note**: When accessing remotely, ensure port 8080 (WebSocket) is accessible on your network.
 
 ## 📱 Configuration Options
 

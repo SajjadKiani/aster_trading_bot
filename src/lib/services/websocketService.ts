@@ -17,6 +17,7 @@ class WebSocketService {
 
   constructor(url?: string) {
     // Will be set dynamically based on config
+    // Initial URL will be updated when WebSocketProvider loads config
     this.url = url || 'ws://localhost:8080';
   }
 
@@ -27,7 +28,7 @@ class WebSocketService {
       if (this.isConnected) {
         this.disconnect();
         this.reconnectAttempts = 0;
-        this.connect().catch(error => {
+        this.connect().catch(_error => {
           console.log('WebSocketService: Reconnection with new URL failed');
         });
       }
@@ -82,7 +83,7 @@ class WebSocketService {
         resolve();
       };
 
-      const onError = (event: Event) => {
+      const onError = (_event: Event) => {
         console.log('WebSocketService: Connection failed to', this.url);
         cleanup();
         // Only reject if we're still in connecting state
@@ -157,7 +158,7 @@ class WebSocketService {
       // Add small delay to prevent race conditions during component mounting
       setTimeout(() => {
         if (!this.isConnected && (!this.ws || this.ws.readyState === WebSocket.CLOSED)) {
-          this.connect().catch(error => {
+          this.connect().catch(_error => {
             console.log('WebSocketService: Auto-connect failed, will retry');
           });
         }

@@ -45,7 +45,9 @@ export default function SymbolConfigForm({ onSave, currentConfig }: SymbolConfig
       server: {
         dashboardPassword: '',
         dashboardPort: 3000,
-        websocketPort: 8080
+        websocketPort: 8080,
+        useRemoteWebSocket: false,
+        websocketHost: null
       }
     },
     symbols: {},
@@ -194,20 +196,31 @@ export default function SymbolConfigForm({ onSave, currentConfig }: SymbolConfig
       fetchSymbolDetails(selectedSymbol);
       // Sync input states with config values
       const symbolConfig = config.symbols[selectedSymbol];
-      setLongTradeSizeInput((symbolConfig.longTradeSize ?? symbolConfig.tradeSize).toString());
-      setShortTradeSizeInput((symbolConfig.shortTradeSize ?? symbolConfig.tradeSize).toString());
+      const hasLongSize = symbolConfig.longTradeSize !== undefined;
+      const hasShortSize = symbolConfig.shortTradeSize !== undefined;
+
+      // Update the toggle state for this symbol
+      setUseSeparateTradeSizes(prev => ({
+        ...prev,
+        [selectedSymbol]: hasLongSize || hasShortSize
+      }));
+
+      setLongTradeSizeInput((hasLongSize && symbolConfig.longTradeSize !== undefined ? symbolConfig.longTradeSize : symbolConfig.tradeSize).toString());
+      setShortTradeSizeInput((hasShortSize && symbolConfig.shortTradeSize !== undefined ? symbolConfig.shortTradeSize : symbolConfig.tradeSize).toString());
     } else {
       setSymbolDetails(null);
     }
-  }, [selectedSymbol]);
+  }, [selectedSymbol, config.symbols]);
 
   // Initialize separate trade sizes state based on existing config
   useEffect(() => {
     const separateSizes: Record<string, boolean> = {};
     Object.keys(config.symbols).forEach(symbol => {
       const symbolConfig = config.symbols[symbol];
-      // Check for undefined specifically, not falsy values (0 is valid)
-      separateSizes[symbol] = symbolConfig.longTradeSize !== undefined || symbolConfig.shortTradeSize !== undefined;
+      // Check if either longTradeSize or shortTradeSize exists (not undefined)
+      const hasLongSize = symbolConfig.longTradeSize !== undefined;
+      const hasShortSize = symbolConfig.shortTradeSize !== undefined;
+      separateSizes[symbol] = hasLongSize || hasShortSize;
     });
     setUseSeparateTradeSizes(separateSizes);
   }, [config.symbols]);
@@ -493,10 +506,54 @@ export default function SymbolConfigForm({ onSave, currentConfig }: SymbolConfig
                 </div>
               </div>
 
+              <Separator />
+
+              <div className="space-y-4">
+                <div className="flex items-center space-x-2">
+                  <Switch
+                    id="useRemoteWebSocket"
+                    checked={config.global.server?.useRemoteWebSocket || false}
+                    onCheckedChange={(checked) => {
+                      handleGlobalChange('server', {
+                        ...config.global.server,
+                        useRemoteWebSocket: checked
+                      });
+                    }}
+                  />
+                  <Label htmlFor="useRemoteWebSocket" className="cursor-pointer">
+                    Enable Remote WebSocket Access
+                  </Label>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Allow the dashboard to connect to the bot from remote machines. When enabled, the WebSocket will automatically use the browser&apos;s hostname instead of localhost.
+                </p>
+
+                {config.global.server?.useRemoteWebSocket && (
+                  <div className="space-y-2 pl-6">
+                    <Label htmlFor="websocketHost">WebSocket Host (Optional)</Label>
+                    <Input
+                      id="websocketHost"
+                      type="text"
+                      value={config.global.server?.websocketHost || ''}
+                      onChange={(e) => {
+                        handleGlobalChange('server', {
+                          ...config.global.server,
+                          websocketHost: e.target.value || null
+                        });
+                      }}
+                      placeholder="Auto-detect from browser (recommended)"
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Leave empty to auto-detect the host from your browser&apos;s location. Only set this if you need a specific hostname or IP address.
+                    </p>
+                  </div>
+                )}
+              </div>
+
               <Alert>
                 <AlertCircle className="h-4 w-4" />
                 <AlertDescription>
-                  <strong>Note:</strong> After changing ports, you'll need to restart the application and access it at the new port.
+                  <strong>Note:</strong> After changing ports, you&apos;ll need to restart the application and access it at the new port.
                   {config.global.server?.dashboardPassword && " Password protection is active - you'll need to login to access the dashboard."}
                 </AlertDescription>
               </Alert>
@@ -700,18 +757,31 @@ export default function SymbolConfigForm({ onSave, currentConfig }: SymbolConfig
                                 if (checked) {
                                   // Initialize separate values with current tradeSize when toggling on
                                   const currentTradeSize = config.symbols[selectedSymbol].tradeSize;
-                                  if (!config.symbols[selectedSymbol].longTradeSize) {
-                                    handleSymbolChange(selectedSymbol, 'longTradeSize', currentTradeSize);
-                                    setLongTradeSizeInput(currentTradeSize.toString());
-                                  }
-                                  if (!config.symbols[selectedSymbol].shortTradeSize) {
-                                    handleSymbolChange(selectedSymbol, 'shortTradeSize', currentTradeSize);
-                                    setShortTradeSizeInput(currentTradeSize.toString());
-                                  }
+                                  const existingLongSize = config.symbols[selectedSymbol].longTradeSize;
+                                  const existingShortSize = config.symbols[selectedSymbol].shortTradeSize;
+
+                                  // Use existing values if they exist, otherwise use tradeSize
+                                  const longSize = existingLongSize !== undefined ? existingLongSize : currentTradeSize;
+                                  const shortSize = existingShortSize !== undefined ? existingShortSize : currentTradeSize;
+
+                                  handleSymbolChange(selectedSymbol, 'longTradeSize', longSize);
+                                  handleSymbolChange(selectedSymbol, 'shortTradeSize', shortSize);
+                                  setLongTradeSizeInput(longSize.toString());
+                                  setShortTradeSizeInput(shortSize.toString());
                                 } else {
-                                  // Clear separate values when toggling off
-                                  handleSymbolChange(selectedSymbol, 'longTradeSize', undefined);
-                                  handleSymbolChange(selectedSymbol, 'shortTradeSize', undefined);
+                                  // Remove separate values when toggling off
+                                  const { longTradeSize: _longTradeSize, shortTradeSize: _shortTradeSize, ...restConfig } = config.symbols[selectedSymbol];
+                                  setConfig({
+                                    ...config,
+                                    symbols: {
+                                      ...config.symbols,
+                                      [selectedSymbol]: restConfig,
+                                    },
+                                  });
+                                  // Reset input fields to tradeSize
+                                  const currentTradeSize = config.symbols[selectedSymbol].tradeSize;
+                                  setLongTradeSizeInput(currentTradeSize.toString());
+                                  setShortTradeSizeInput(currentTradeSize.toString());
                                 }
                               }}
                             />

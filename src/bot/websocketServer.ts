@@ -82,7 +82,10 @@ export class StatusBroadcaster extends EventEmitter {
                 break;
 
               default:
-                console.log('Unknown message type:', message.type);
+                // Only log truly unknown message types
+                if (!['pong'].includes(message.type)) {
+                  console.log('Unknown message type:', message.type);
+                }
             }
           } catch (error) {
             console.error('Failed to parse WebSocket message:', error);
@@ -202,6 +205,16 @@ export class StatusBroadcaster extends EventEmitter {
       orderFilledAccumulatedQuantity: liquidationEvent.orderFilledAccumulatedQuantity,
       orderTradeTime: liquidationEvent.orderTradeTime,
       eventTime: liquidationEvent.eventTime,
+      timestamp: new Date(),
+      // Include threshold status for real-time UI updates
+      thresholdStatus: (liquidationEvent as any).thresholdStatus,
+    });
+  }
+
+  // Broadcast threshold updates to connected clients
+  broadcastThresholdUpdate(thresholdUpdate: any): void {
+    this._broadcast('threshold_update', {
+      ...thresholdUpdate,
       timestamp: new Date(),
     });
   }
@@ -461,6 +474,14 @@ export class StatusBroadcaster extends EventEmitter {
       title,
       message,
       details,
+    });
+  }
+
+  // Broadcast trade size warnings
+  broadcastTradeSizeWarnings(warnings: any[]): void {
+    this._broadcast('trade_size_warnings', {
+      warnings,
+      timestamp: new Date(),
     });
   }
 

@@ -16,6 +16,7 @@ import pnlService from '../lib/services/pnlService';
 import { getRateLimitManager } from '../lib/api/rateLimitManager';
 import { startRateLimitLogging } from '../lib/api/rateLimitMonitor';
 import { initializeRateLimitToasts } from '../lib/api/rateLimitToasts';
+import { thresholdMonitor } from '../lib/services/thresholdMonitor';
 
 // Helper function to kill all child processes (synchronous for exit handler)
 function killAllProcesses() {
@@ -39,6 +40,7 @@ class AsterBot {
   private isRunning = false;
   private statusBroadcaster: StatusBroadcaster;
   private isHedgeMode: boolean = false;
+  private tradeSizeWarnings: any[] = [];
 
   constructor() {
     // Will be initialized with config port
@@ -61,6 +63,51 @@ class AsterBot {
       // Initialize config manager and load configuration
       this.config = await configManager.initialize();
       console.log('✅ Configuration loaded');
+
+      // Validate trade sizes against exchange minimums
+      const { validateAllTradeSizes } = await import('../lib/validation/tradeSizeValidator');
+      const validationResult = await validateAllTradeSizes(this.config);
+
+      if (!validationResult.valid) {
+        console.error('❌ CONFIGURATION ERROR: Trade sizes below exchange minimums detected!');
+        console.error('The following symbols have insufficient trade sizes:');
+
+        validationResult.warnings.forEach(warning => {
+          console.error(`  ${warning.symbol}: ${warning.reason}`);
+          console.error(`    Current price: $${warning.currentPrice.toFixed(2)}`);
+          console.error(`    Leverage: ${warning.leverage}x`);
+          console.error(`    MINIMUM REQUIRED: ${warning.minimumRequired.toFixed(2)} USDT`);
+        });
+
+        console.error('\n⚠️  Please update your configuration at http://localhost:3000/config');
+        console.error('The bot will continue but trades for these symbols will be rejected.\n');
+
+        // Store warnings to broadcast to UI
+        this.tradeSizeWarnings = validationResult.warnings;
+      }
+
+      // Security warnings
+      const dashboardPassword = this.config.global.server?.dashboardPassword;
+      if (!dashboardPassword || dashboardPassword === 'admin') {
+        console.warn('⚠️  WARNING: Using default "admin" dashboard password!');
+        console.warn('   Please change it at http://localhost:3000/config for better security');
+      } else if (dashboardPassword.length < 8) {
+        console.warn('⚠️  WARNING: Dashboard password is less than 8 characters');
+        console.warn('   Consider using a stronger password for better security');
+      }
+
+      // Check if exposing to network with weak password
+      const websocketHost = this.config.global.server?.websocketHost;
+      const isRemoteAccess = this.config.global.server?.useRemoteWebSocket || websocketHost;
+      if (isRemoteAccess && (!dashboardPassword || dashboardPassword === 'admin' || dashboardPassword.length < 8)) {
+        console.warn('🔴 SECURITY RISK: Remote access enabled with weak/default password!');
+        console.warn('   This could allow unauthorized access to your bot controls');
+        console.warn('   Please set a strong password immediately at /config');
+      }
+
+      // Initialize threshold monitor with actual config
+      thresholdMonitor.updateConfig(this.config);
+      console.log(`✅ Threshold monitor initialized with ${Object.keys(this.config.symbols).length} symbols`);
 
       // Initialize Rate Limit Manager with config
       const rateLimitConfig = this.config.global.rateLimit || {};
@@ -89,6 +136,11 @@ class AsterBot {
         paperMode: this.config.global.paperMode,
         symbols: Object.keys(this.config.symbols),
       });
+
+      // Broadcast trade size warnings if any
+      if (this.tradeSizeWarnings.length > 0) {
+        this.statusBroadcaster.broadcastTradeSizeWarnings(this.tradeSizeWarnings);
+      }
 
       // Listen for config updates
       configManager.on('config:updated', (newConfig) => {
@@ -349,6 +401,11 @@ class AsterBot {
         this.statusBroadcaster.logActivity(`Blocked: ${data.symbol} ${data.side} - ${data.blockType}`);
       });
 
+      // Listen for threshold updates and broadcast to UI
+      thresholdMonitor.on('thresholdUpdate', (thresholdUpdate: any) => {
+        this.statusBroadcaster.broadcastThresholdUpdate(thresholdUpdate);
+      });
+
       this.hunter.on('positionOpened', (data: any) => {
         console.log(`📈 Position opened: ${data.symbol} ${data.side} qty=${data.quantity}`);
         this.positionManager?.onNewPosition(data);
@@ -468,6 +525,10 @@ class AsterBot {
         this.hunter.updateConfig(newConfig);
         console.log('✅ Hunter config updated');
       }
+
+      // Update threshold monitor with new config
+      thresholdMonitor.updateConfig(newConfig);
+      console.log('✅ Threshold monitor config updated');
 
       // Update PositionManager with new config
       if (this.positionManager) {
